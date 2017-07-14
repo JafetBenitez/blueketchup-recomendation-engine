@@ -1,63 +1,76 @@
 import pandas as pd
 from sqlalchemy import create_engine
 from sklearn.metrics import jaccard_similarity_score
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy
 
+import logging
+logging.basicConfig(filename='blueketchup-ml.log',level=logging.DEBUG, format='[%(levelname)s] : %(asctime)s - %(message)s', datefmt='%m/%d/%Y %I:%M:%S')
 CONNECTION_STRING = "postgresql://engine:1234567@localhost:5432/blueketchup"
 
 
 
-#users = pd.read_sql_query("select id from auth_user", con=engine)
-
-#query = "select tag_id from core_user_preferences where id = "+str(usr["id"])+";"
-
-
 def load_user_preferences(user_id):
+	logging.debug("load_user_preferences({0})".format(user_id))
 	engine = create_engine(CONNECTION_STRING)
-	#query = "select tag_id from core_user_preferences where id = "+str(user_id)+";"
 
 	query = """
-			select core_tag.id as tag, case when core_user_preferences is null then 0 else 1 end as value
-			from auth_user as users
-			left join core_user_preferences on core_user_preferences.user_id = users.id
-			left join core_tag on  core_user_preferences.tag_id = core_tag.id
-			where users.id = {0}
+			SELECT
+				id,
+				COALESCE(
+					(
+					SELECT 1
+					FROM core_user_preferences
+					WHERE tag_id = core_tag.id AND user_id = {0}),
+					0) AS like
+			FROM core_tag;
 			""".format(user_id)
 
 	preferences = pd.read_sql_query(query, con=engine)
+
 	return preferences
 
 def load_profile(profile_id):
+	logging.debug("load_profile()")
 	engine = create_engine(CONNECTION_STRING)
-	#query = "select tag_id from core_profile_tag where id = {profile_id};"
-
 	query = """
-			select core_tag.id as tag, case when core_profile_tags is null then 0 else 1 end as value
-			from core_profile as profile
-			left join core_profile_tags on core_profile_tags.profile_id = profile.id
-			left join core_tag on  core_profile_tags.tag_id = core_tag.id
-			where profile.id = {0}
+			SELECT
+				id,
+				COALESCE(
+					(
+					SELECT 1
+					FROM core_profile_tags
+					WHERE tag_id = core_tag.id AND profile_id = {0}),
+					0) as like
+			FROM core_tag;
 			""".format(profile_id)
+
 	profile = pd.read_sql_query(query, con=engine)
+
 	return profile
 
 def catalog_preferences():
+	logging.debug("catalog_preferences()")
 	engine = create_engine(CONNECTION_STRING)
 	users = pd.read_sql_query("select id from auth_user", con=engine)
 	profiles = pd.read_sql_query("select id from core_profile", con=engine)
 
 	for index, usr in users.iterrows():
 
-		alpha_usr = load_user_preferences(usr["id"])
-		print("user {0}".format(usr["id"]))
+		user_preferences = load_user_preferences(usr["id"])
 
 		for inx, prf in profiles.iterrows():
-			print("profile {0}".format(prf["id"]))
+			profile_tags = load_profile(prf["id"])
+			similarity = jaccard_similarity_score(user_preferences["like"].tolist(), profile_tags["like"].tolist())
 
-			beta_profile = load_profile(prf["id"])
+			logging.info('Similitud entre el usuario {0} y el perfil {1} : {2}'.format(usr["id"], prf["id"], similarity))
 
-			print(beta_profile["value"])
-			print(jaccard_similarity_score(alpha_usr["value"], beta_profile["value"]))
-			print("That´s all")
+			if similarity > 0.5:
+				logging.info('Se ha incluido el usuario {0} en el perfil {1}'.format(usr["id"], prf["id"]))
+
+
+
+			logging.info("That´s all")
 
 
 catalog_preferences()
