@@ -1,11 +1,13 @@
 import pandas as pd
 from sqlalchemy import create_engine
 from sklearn.metrics import jaccard_similarity_score
-from sklearn.metrics.pairwise import cosine_similarity
-import numpy
-
 import logging
-logging.basicConfig(filename='blueketchup-ml.log',level=logging.DEBUG, format='[%(levelname)s] : %(asctime)s - %(message)s', datefmt='%m/%d/%Y %I:%M:%S')
+
+logging.basicConfig(
+	filename='blueketchup-ml.log',
+	level=logging.DEBUG,
+	format='%(asctime)s |%(levelname)s : %(message)s',
+	datefmt='%m/%d/%Y %I:%M:%S')
 CONNECTION_STRING = "postgresql://engine:1234567@localhost:5432/blueketchup"
 
 
@@ -58,17 +60,54 @@ def catalog_preferences():
 	for index, usr in users.iterrows():
 
 		user_preferences = load_user_preferences(usr["id"])
-
+		is_cataloged = False
 		for inx, prf in profiles.iterrows():
 			profile_tags = load_profile(prf["id"])
-			similarity = jaccard_similarity_score(user_preferences["like"].tolist(), profile_tags["like"].tolist())
+			similarity = jaccard_similarity_score(user_preferences["like"]
+				.tolist(), profile_tags["like"].tolist())
 
-			logging.info('Similitud entre el usuario {0} y el perfil {1} : {2}'.format(usr["id"], prf["id"], similarity))
-
+			logging.info('Similitud entre el usuario {0} y el perfil {1} : {2}'
+				.format(usr["id"], prf["id"], similarity))
+			connection = engine.connect()
 			if similarity > 0.5:
-				logging.info('Se ha incluido el usuario {0} en el perfil {1}'.format(usr["id"], prf["id"]))
+				try:
+					is_cataloged = True
+					connection.execute(
+					"""
+						INSERT INTO core_profile_users (user_id, profile_id)
+						VALUES ({0}, {1}) RETURNING id;
+					""".format(usr["id"], prf["id"]))
+					logging.info('Se ha incluido el usuario {0} en el perfil {1}'
+						.format(usr["id"], prf["id"]))
+
+				except Exception as e:
+					logging.error(e)
+		if not is_cataloged:
+			try:
+				new_profile_name = "Alpha-"+str(usr["id"])
+				new_profile = connection.execute(
+				"""
+					INSERT INTO core_profile (name)
+					VALUES ('{0}') RETURNING id;
+				""".format(new_profile_name))
+
+				print(new_profile)
+
+				logging.info('Se ha creado un nuevo perfil : {1}'
+					.format(new_profile_name))
+
+				connection.execute(
+				"""
+					INSERT INTO core_user_profiles (user_id, profile_id)
+					VALUES ({0}) RETURNING id;
+				""".format(usr["id"], new_profile["id"]))
 
 
+
+
+
+			except Exception as e:
+				logging.error(e)
 
 			logging.info("That´s all")
 
